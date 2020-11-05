@@ -294,5 +294,5 @@ end
 function minify(path)
     io.popen('lua ./minify.lua minify ' .. path .. ' > bundle.min.lua')
 end
-
-minify(bundle('../src/', 'main.lua'))
+bundle('../src/', 'main.lua')
+-- minify(b)
