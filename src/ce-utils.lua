@@ -1,4 +1,4 @@
---- @class utils
+---@class utils
 local utils = {}
 
 utils.http = {}
@@ -42,7 +42,7 @@ end
 ---@param size	number	The prefered size of the allocated block
 
 function utils.memory.shared_allocation(name, size)
-    return allocateSharedMemory(name, size)
+    return allocateSharedMemory(name)
 end
 
 utils.addresses = {}
@@ -55,5 +55,46 @@ utils.addresses = {}
 function utils.addresses.get(addr_str, _local)
     return getAddress(addr_str, _local)
 end
+
+utils.classes = {}
+
+---@class StringBuffer
+---@field characters table
+---@field write fun(str: string): nil
+---@field tostring fun(): string
+
+---@return StringBuffer
+function utils.classes.StringBuffer(initial_str)
+    local self = {}
+    local insert = table.insert
+    local concat = table.concat
+    self.characters = {}
+
+    function self:write(str)
+        for i=1, #str do
+            insert(self.characters, str:sub(i, i))            
+        end
+    end
+
+    function self:tostring()
+        return concat(self.characters, '')
+    end
+
+    if initial_str then self:write(initial_str) end
+
+    return self
+end
+
+
+function utils.classes.Timer(owner, enabled)
+    -- TODO: https://wiki.cheatengine.org/index.php?title=Lua:Class:Timer
+end
+
+
+utils.actions = {}
+function utils.actions.auto_assemble(code)
+    return autoAssemble(code)
+end
+
 
 return utils
