@@ -12,6 +12,22 @@ local function get_lines(text)
     return lines
 end
 
+local function args_to_str(...)
+    local args = {...}
+    for k,v in next, args do
+        args[k] = tostring(v)
+    end
+    return table.concat(args, ' ')
+end
+
+local function log_info(text)
+    print('\27[36minfo\27[0m\tbundler: '..tostring(text))
+end
+
+local function log_error(text)
+    print('\27[31merror\27[0m\tbundler: '..tostring(text))
+end
+
 local concat = table.concat
 local remove = table.remove
 local insert = table.insert
@@ -23,6 +39,41 @@ local function string_to_array(str)
 end
 
 local global_line_states = {withinMLComment = false,withinLongString = false}
+
+
+--- Line Text Helpers
+local function remove_string(str)
+    local chars = string_to_array(str)
+    local str_open = {fluffy=false,skinny=false}
+    local new_chars = {}
+
+    local function isOpen()
+        for _, v in str_open do
+            if v then return true end
+        end
+    end 
+
+
+    for i, char in next, chars do
+        if chars[i-1] ~= '\\' and not str_open.skinny and char == '"' then
+            if str_open.fluffy then
+                str_open.fluffy = false
+            else
+                str_open.fluffy = true
+            end
+        elseif chars[i-1] ~= '\\' and not str_open.fluffy and char == "'" then
+            if str_open.skinny then
+                str_open.skinny = false
+            else
+                str_open.skinny = true
+            end            
+        else
+            insert(new_chars, char)
+        end
+    end
+
+    return concat(new_chars, '')
+end
 
 local function remove_comments(line)
     local line_states = {withinLineComment = false,withinString = false,withinAltString = false}
@@ -79,6 +130,7 @@ local function remove_comments(line)
     return table.concat(char_array, '')
 end
 
+--- Char Arrays Utils
 local function char_arr_eq_str(arr, str, startindex)
     startindex = startindex or 0
     local chars = string_to_array(str)
@@ -105,7 +157,9 @@ local function char_arr_splice(arr, startindex, endindex)
     return chars
 end
 
-local function get_requires(source)
+
+--- Module Extraction
+local function get_requires(source, scriptpath)
     local require_lines = {}
 
     for _, line in next, get_lines(source) do
@@ -116,14 +170,14 @@ local function get_requires(source)
     end
 
     local requires = {}
-    for _, require_str in next, require_lines do
-        local line_chars = string_to_array(require_str)
-        -- local requires = {}
+    local modules = {}
+    for ln, line in next, require_lines do
+        local line_chars = string_to_array(line)
         local isRequireOpening = false
         local isRequireClosing = false
 
-        for i, char in next, line_chars do
-            if not isRequireOpening and char_arr_eq_str(line_chars, 'require', i-1) then
+        for charpos, char in next, line_chars do
+            if not isRequireOpening and char_arr_eq_str(line_chars, 'require', charpos-1) then
                 isRequireOpening = true
                 insert(requires, {})
             elseif isRequireOpening and char == '(' then
@@ -131,6 +185,12 @@ local function get_requires(source)
                 isRequireOpening  = false
             elseif isRequireClosing and char == ')' then
                 isRequireClosing  = false
+                -- log_info(('%s %s:%s require(%s)'):format(scriptpath, ln, charpos, concat(requires[#requires], '')))
+                insert(modules, {
+                    module_path = remove_string(concat(requires[#requires], '')),
+                    script_path = scriptpath,
+                    line = ln,
+                })
             elseif isRequireClosing then
                 insert(requires[#requires], char)
             end
@@ -138,46 +198,16 @@ local function get_requires(source)
 
     end
     
+    
     for k,v in next, requires do
         requires[k] = concat(v, '')
     end
 
 
-    return requires
+    return modules
 end
 
-local function remove_string(str)
-    local chars = string_to_array(str)
-    local str_open = {fluffy=false,skinny=false}
-    local new_chars = {}
 
-    local function isOpen()
-        for _, v in str_open do
-            if v then return true end
-        end
-    end 
-
-
-    for i, char in next, chars do
-        if chars[i-1] ~= '\\' and not str_open.skinny and char == '"' then
-            if str_open.fluffy then
-                str_open.fluffy = false
-            else
-                str_open.fluffy = true
-            end
-        elseif chars[i-1] ~= '\\' and not str_open.fluffy and char == "'" then
-            if str_open.skinny then
-                str_open.skinny = false
-            else
-                str_open.skinny = true
-            end            
-        else
-            insert(new_chars, char)
-        end
-    end
-
-    return concat(new_chars, '')
-end
 
 local path = {}
 
@@ -193,7 +223,7 @@ local function fix_path(import_path)
     return concat(chars, '')
 end
 
-local pathnames = {}
+-- local pathnames = {}
 
 local cached_contents = {}
 
@@ -213,86 +243,163 @@ function get_module(pathname)
 end
 
 local loaded = {}
+
 function intercept_requires(base_dir, script_file)
     if (base_dir .. script_file):match('^'..base_dir..base_dir) then base_dir = '' end
     local path, contents = get_module(base_dir .. script_file)
+
     local data = {
-        script_file = script_file, script_path = path,
-        contents = contents, base_dir = base_dir,
+        script_file = script_file,
+        script_path = path,
+        contents = contents,
+        base_dir = base_dir,
+        required_at = '0:0',
         imports = {}
     }
 
-    if loaded[path] then
-        return data
-    else
-        loaded[path] = true
+    if path then
+        if loaded[path] then
+            return data
+        else
+            loaded[path] = true
+        end
     end
 
-    for _, module in next, get_requires(contents) do
-        local dependency = intercept_requires(base_dir, fix_path(remove_string(module)))
-        insert(data.imports, {
-            dependant = path,
-            namecall = remove_string(module),
-            source = dependency.contents,
-            path = dependency.script_path
-        })
+    if contents then
+        for _, module in next, get_requires(contents, path) do
+            local dependency = intercept_requires(base_dir, fix_path(module.module_path))
+            insert(data.imports, {
+                dependant = path,
+                namecall = module.module_path,
+                source = dependency.contents,
+                path = dependency.script_path
+            })
 
-        for _, submodule in next, dependency.imports do
-            insert(data.imports, submodule)
+            for _, submodule in next, dependency.imports do
+                insert(data.imports, submodule)
+            end
         end
+    else
+        log_error(('module path "%s" not found.'):format(script_file))
     end
 
     return data
 end
 
+local function StringBuffer(initial_str)
+    local self = {}
+    local insert = table.insert
+    local concat = table.concat
+    self.characters = {}
 
-
-function bundle(dir, file, outdir)
-    local funcs = {}
-    local bundle_source = ""
-    local entry = intercept_requires(dir, file)
-
-    for _, module_info in next, entry.imports do
-        funcs[module_info.namecall] = module_info.source
-    end
-    
-    
-    funcs['entry'] = entry.contents
-    bundle_source = bundle_source .. "(function() local modules = {}\nlocal require = function(module) return modules[module]() end\n"
-    bundle_source = bundle_source .. " modules = {"
-
-    for namecall, source in next, funcs do
-        local lines = get_lines(source)
-    
-        for i,v in next, lines do lines[i] = remove_comments(v) end
-    
-        bundle_source = bundle_source .. '["'..namecall..'"] = function() '.. concat(lines, ' ') .. ' end,'
-    end
-    
-    bundle_source = bundle_source .. '}\n'
-    bundle_source = bundle_source .. "\nmodules.entry()\nend)()"
-    
-    if outdir then
-        outdir = string_to_array(outdir)
-        local lastchar = outdir[#outdir]
-        if lastchar ~= '/' or lastchar ~= '\\' then
-            insert(outdir, '/')
+    function self:write(str)
+        for i=1, #str do
+            insert(self.characters, str:sub(i, i))            
         end
-        outdir = concat(outdir, '')
+    end
+
+    function self:tostring()
+        return concat(self.characters, '')
+    end
+
+    if initial_str then self:write(initial_str) end
+
+    return self
+end
+
+local function write_file(file_dir, file_name, contents)
+    if file_dir ~= nil then
+        file_dir = string_to_array(file_dir)
+        local lastchar = file_dir[#file_dir]
+        if lastchar ~= '/' or lastchar ~= '\\' then
+            insert(file_dir, '/')
+        end
+        file_dir = concat(file_dir, '')
     else
-        outdir = ''
+        file_dir = ''
     end
     
-    local filepath = outdir .. 'bundle.lua'
+    local filepath = file_dir .. file_name
     local file = io.open(filepath, 'w+')
-    file:write(bundle_source)
+    file:write(contents)
     file:close()
 
     return filepath
 end
 
-function minify(path)
-    io.popen('lua ./minify.lua minify ' .. path .. ' > bundle.min.lua')
+local function get_cli_arg(arg_name)
+    if arg ~= nil then
+        for i, passed_arg_val in next, arg do
+            local arg_chars = string_to_array(passed_arg_val)
+
+            if char_arr_eq_str(arg_chars, arg_name) then
+                return arg[i+1] or true
+            end
+        end
+    end
 end
-bundle('../src/', 'main.lua')
--- minify(b)
+
+local fileMinifier = require('.minify')
+
+local function minify_code(code)
+    local success, message = pcall(function()
+        return fileMinifier.minify(code)
+    end)
+
+    if success then
+        return message
+    else
+        return false
+    end
+end
+
+local minify_files = get_cli_arg('-minify')
+
+local function clean_code(code)
+    local lines = get_lines(code)
+    for ln, line in next, lines do
+        lines[ln] = remove_comments(line)
+    end
+    return concat(lines, ' ')
+end
+
+function bundle(dir, file, outdir)
+    log_info('working...')
+    local bundle_source = StringBuffer()
+    local entry = intercept_requires(dir, file)
+    local funcs = {entry=entry.contents}
+
+    for _, module_info in next, entry.imports do
+        funcs[module_info.namecall] = module_info.source
+    end
+
+    bundle_source:write("(function() local modules = {} local require = function(module) return modules[module]() end ")
+    bundle_source:write(" modules = {")
+
+    for namecall, source in next, funcs do
+        local doDefault = true
+        --Clean Code
+        local cleaned_source = clean_code(source)
+        --Minify files
+        if minify_files then
+            local minified = minify_code(cleaned_source)
+            if minified then
+                bundle_source:write(('["%s"] = function() %s end,'):format(namecall, minified))
+                doDefault = true
+            end
+        end
+        --Do Default
+        if doDefault then
+            bundle_source:write(('["%s"] = function() %s end,'):format(namecall, cleaned_source))
+        end
+    end
+    
+    bundle_source:write('} ')
+    bundle_source:write(" modules.entry() end)()")
+
+    local filepath = write_file(outdir, 'bundle.lua', bundle_source:tostring()) 
+    log_info('output file at "' .. filepath ..'"')
+    return filepath
+end
+
+local bundle_path = bundle('../src/', 'main.lua')

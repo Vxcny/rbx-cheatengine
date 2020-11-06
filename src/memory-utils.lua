@@ -52,7 +52,8 @@ local function str_to_hex(str)
     return byte
 end
 
-local function readsb(addr, len) --TODO: Rename;Idk what "sb" is :|
+--/* TODO: Rename readsb
+local function readsb(addr, len)
     local str = ""
     for i=1,len do
         str=str..byte_to_str(read_byte(addr))

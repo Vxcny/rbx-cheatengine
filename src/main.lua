@@ -38,13 +38,12 @@ c_ref2 = { 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15}
 
 
 local function log_info(text)
-    print('executor: '..text)
+    print('info: '..text)
 end
 
 
-
-log_info('bytecode size: '.. addr_to_str(bytecode_size))
-log_info('bytecode: '.. addr_to_str(bytecode_loc))
+log_info('size of bytecode '.. addr_to_str(bytecode_size))
+log_info('bytecode '.. addr_to_str(bytecode_loc))
 
 
 
@@ -71,7 +70,7 @@ r_newthread        = get_prologue(r_newthread);
 -- a place to store our function information
 -- for external function calls
 --
-local arg_data = allocateSharedMemory(4096);
+local arg_data = utils.memory.shared_allocation(4096);
 assert(arg_data~=nil, 'Failed to allocate shared memory...')
 
 local ret_location = (arg_data + 64);

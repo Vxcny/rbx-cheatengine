@@ -30,8 +30,19 @@ end
 utils.memory = {}
 
 ---@param size number Size of allocation
-function utils.memory.allocate(size, ...)
-    return allocateMemory(size, ...)
+function utils.memory.allocate(size)
+    return allocateMemory(size)
+end
+
+
+---Creates a shared memory object of the given size if it doesn't exist yet. If size is not given and there is no shared region with this name then the default size of 4096 is used
+---It then maps this shared memory block into the currently targeted process. It returns the address of mapped region in the target process
+---When the process closes, you can target another process and allocate the same block on there again. Then you can read the state before the process closed
+---@param name	string	The name of the block to allocate
+---@param size	number	The prefered size of the allocated block
+
+function utils.memory.shared_allocation(name, size)
+    return allocateSharedMemory(name, size)
 end
 
 utils.addresses = {}

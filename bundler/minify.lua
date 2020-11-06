@@ -186,6 +186,7 @@ function CreateLuaTokenStream(text)
 	end
 
 	-- Error
+	--[[
 	local olderr = error
 	local function error(str)
 		local q = 1
@@ -205,7 +206,7 @@ function CreateLuaTokenStream(text)
 		end
 		olderr("file<"..line..":"..char..">: "..str)
 	end
-
+]]
 	-- Consume a long data with equals count of `eqcount'
 	local function longdata(eqcount)
 		while true do
@@ -551,7 +552,7 @@ function CreateLuaParser(text)
 				end;
 			}
 		else
-			print(debugMark())
+			-- print(debugMark())
 			error(getTokenStartPosition(tk)..": Unexpected symbol")
 		end
 	end
@@ -1861,15 +1862,17 @@ end
 
 -- Prints out an AST to a string
 function PrintAst(ast)
-
+	local insert = table.insert
 	local printStat, printExpr;
+	local source_code = {}
 
 	local function printt(tk)
 		if not tk.LeadingWhite or not tk.Source then
-			error("Bad token: "..FormatTable(tk))
+			return
 		end
-		io.write(tk.LeadingWhite)
-		io.write(tk.Source)
+
+		insert(source_code, tk.LeadingWhite)
+		insert(source_code, tk.Source)
 	end
 
 	printExpr = function(expr)
@@ -2129,6 +2132,7 @@ function PrintAst(ast)
 	end
 
 	printStat(ast)
+	return table.concat(source_code, "")
 end
 
 -- Adds / removes whitespace in an AST to put it into a "standard formatting"
@@ -3193,6 +3197,7 @@ local function usageError()
 			"    find-replacable ones to aide in reverse engineering minified code.\n", 0)
 end
 
+--[[
 local args = {...}
 if #args ~= 2 then
 	usageError()
@@ -3226,3 +3231,29 @@ elseif args[1] == 'unminify' then
 else
 	usageError()
 end
+]]
+
+function init(action, source)
+	local ast = CreateLuaParser(source)
+	local global_scope, root_scope = AddVariableInfo(ast)
+	
+	local actions = {}
+	function actions.minify(ast, global_scope, root_scope)
+		MinifyVariables(global_scope, root_scope)
+		StripAst(ast)
+		return PrintAst(ast)
+	end
+	
+	function actions.beautify(ast, global_scope, root_scope)
+		BeautifyVariables(global_scope, root_scope)
+		FormatAst(ast)
+		return PrintAst(ast)
+	end
+
+	return actions[action](ast, global_scope, root_scope)
+end
+
+return {
+	minify = function(...) return init('minify', ...) end,
+	beautify = function(...) return init('beautify', ...) end
+}
