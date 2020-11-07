@@ -1,1 +1,2 @@
-@cmd /c "cd ./bundler && lua luabundle.lua ../src/main.lua ../script_executor.lua"
+@cd ./bundler
+@lua ./main.lua -o .. -f script_executor.lua
